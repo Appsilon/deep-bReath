@@ -11,13 +11,10 @@ library(leaflet)
 
 source("semantic_ui.R")
 
-locations_pl <- aq_locations(country = "PL")
-locations_pl <- locations_pl %>% mutate(city_station = paste(city, location, sep = " - "))
+stations_all <- read_feather("stations_all.feather")
+sensor_all <- read_feather("sensor_all.feather")
 
-locations <-  c("Otwock - Brzozowa", "Płock - Gimnazjum", "Warszawa - Guty Duże", "Belsk - IGFPAN", "Warszawa - Komunikacyjna",
-                "Siedlce - Konarskiego", "Granica - KPN", "Warszawa - Marszałkowska", "Warszawa - Podleśna", "Piastów - Pułaskiego",   
-                "Płock - Reja", "Żyrardów - Roosevelta", "Warszawa - Targówek", "Radom - Tochtermana", "Warszawa - Ursynów",
-                "Legionowo - Zegrzyńska")
+locations <- stations_all$stationName %>% sort
 
 validate_inputs <- function(input, label){
   validate(
@@ -117,9 +114,7 @@ server <- shinyServer(function(input, output) {
   
   selected_location <- reactive({
     validate_inputs(input$location_pl, "stację")
-    location <- jsonlite::fromJSON(input$location_pl)
-    split_location <- strsplit(location, " - ")
-    list(city = split_location[[1]][1], station = split_location[[1]][2])
+    jsonlite::fromJSON(input$location_pl)
   })
   
   output$location_search_2 <- renderUI({
@@ -128,48 +123,50 @@ server <- shinyServer(function(input, output) {
   
   selected_location_2 <- reactive({
     validate_inputs(input$location_pl_2, "station")
-    location <- jsonlite::fromJSON(input$location_pl_2)
-    split_location <- strsplit(location, " - ")
-    list(city = split_location[[1]][1], station = split_location[[1]][2])
+    jsonlite::fromJSON(input$location_pl_2)
   })
   
   get_city_station_url <- function(selected_location) {
-    city <- selected_location$city
-    station <- selected_location$station
-    city_filter <- locations_pl %>% filter(city == city, location == station)
-    city_url <- city_filter$cityURL
-    station_url <- city_filter$locationURL
-    pm25 <- city_filter$pm25
-    pm10 <- city_filter$pm10
-    no2 <- city_filter$no2
-    co <- city_filter$co
-    list(city = city_url, station_url = station_url, pm25 = pm25, pm10 = pm10, no2 = no2, co = co)
+    filter_location <- stations_all %>% filter(stationName == selected_location)
+    pm25 = filter_location$`69`
+    pm10 = filter_location$`3`
+    no2 =  filter_location$`6`
+    co =  filter_location$`8`
+    id = filter_location$`id`
+    list(id = id, location = selected_location, pm25 = pm25, pm10 = pm10, no2 = no2, co = co)
   }
   
-  measurements <- reactive ({
-    selection_1 <- get_city_station_url(selected_location())
-    selection_2 <- get_city_station_url(selected_location_2())
+  measurements <- reactive({
+    location_1_value = selected_location()
+    location_2_value = selected_location_2()
+    selection_1 <- get_city_station_url(location_1_value)
+    selection_2 <- get_city_station_url(location_2_value)
     
-    measurement_1 <- aq_measurements(country = "PL", city = selection_1$city_url,
-                          location = selection_1$station_url)
-    
-    measurement_2 <- aq_measurements(country = "PL", city = selection_2$city_url,
-                    location = selection_2$station_url)
-    
-    list(data = plyr::rbind.fill(measurement_1, measurement_2), 
-         is_pm25 = selection_1$pm25 | selection_2$pm25,
-         is_pm10 = selection_1$pm10 | selection_2$pm10,
-         is_no2 = selection_1$no2 | selection_2$no2,
-         is_co = selection_1$co | selection_2$co)
+    measurement <- sensor_all %>%
+      filter(id %in% c(selection_1$pm25, selection_2$pm25,
+                       selection_1$pm10, selection_2$pm10,
+                       selection_1$no2, selection_2$no2,
+                       selection_1$co, selection_2$co)) %>% 
+      mutate(group_id = ifelse(id %in% c(selection_1$pm25, selection_1$pm10, selection_1$no2, selection_1$co),
+                               selection_1$location, selection_2$location))
+
+    list(data = measurement,
+         is_pm25 = !is.na(selection_1$pm25) | !is.na(selection_2$pm25),
+         is_pm10 = !is.na(selection_1$pm10) | !is.na(selection_2$pm10),
+         is_no2 = !is.na(selection_1$no2) | !is.na(selection_2$no2),
+         is_co = !is.na(selection_1$co) | !is.na(selection_2$co))
 })
   
   generate_plot <- function(measurement_values, element, titel) {
     data_measurements <- measurement_values$data
-    data_chart <- data_measurements %>% filter(parameter == element)
-    n_series = length(unique(data_chart$location)) 
-    plot_ly(data = data_chart, x = ~as.POSIXct(dateLocal, tz = "UTC"), y = ~value, group_by = ~location, color = ~location,
+    data_chart <- data_measurements %>% filter(idParam == element)
+    n_series = length(unique(data_chart$group_id))
+    plot_ly(data = data_chart, x = ~as.POSIXct(datetime, tz = "UTC"),
+            y = ~value_sensor,
+            group_by = ~group_id,
+            color = ~group_id,
             colors = viridis::viridis_pal(option = "D")(n_series),
-            text = paste(data_chart$value, data_chart$unit), mode = 'lines+markers') %>%
+            text = paste(data_chart$value_sensor), mode = 'lines+markers') %>%
       layout(title = titel, showlegend = T)
   }
   
@@ -183,22 +180,22 @@ server <- shinyServer(function(input, output) {
 
   output$plot_pm25 <- renderPlotly({
     measurement_values <- measurements()
-    generate_plot(measurement_values, element = "pm25", titel = "Wykres poziomu pyłu PM2.5")
+    generate_plot(measurement_values, element = 69, titel = "Wykres poziomu pyłu PM2.5")
   })
   
   output$plot_pm10 <- renderPlotly({
     measurement_values <- measurements()
-    generate_plot(measurement_values, element = "pm10", titel = "Wykres poziomu pyłu PM10")
+    generate_plot(measurement_values, element = 3, titel = "Wykres poziomu pyłu PM10")
   })
   
   output$plot_no2 <- renderPlotly({
     measurement_values <- measurements()
-    generate_plot(measurement_values, element = "no2", titel = "Wykres poziomu gazu NO2")
+    generate_plot(measurement_values, element = 6, titel = "Wykres poziomu gazu NO2")
   })
   
   output$plot_co <- renderPlotly({
     measurement_values <- measurements()
-    generate_plot(measurement_values, element = "co", titel = "Wykres poziomu gazu CO")
+    generate_plot(measurement_values, element = 8, titel = "Wykres poziomu gazu CO")
   })
   
   output$ui_pm25 <- renderUI ({
