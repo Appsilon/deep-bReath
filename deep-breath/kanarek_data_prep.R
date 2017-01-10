@@ -55,7 +55,8 @@ do.call(plyr::rbind.fill, lapply(kanarek$sensorsStation, function(x){
 
 sensor_all <- sensor_all %>%
   mutate(value_sensor = as.numeric(`value`),
-         datetime = as.POSIXct(as.numeric(name) / 1000, tz = "UTC", origin="1970-01-01"))
+         datetime = as.POSIXct(as.numeric(name) / 1000, tz = "UTC", origin="1970-01-01")) %>%
+  filter(!is.na(value_sensor))
 
 write_feather(stations_all, "stations_all.feather")
 write_feather(sensor_all, "sensor_all.feather")

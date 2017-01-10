@@ -24,72 +24,8 @@ validate_inputs <- function(input, label){
 }
 
 validation_reject_msg <- function(label) {
-  paste("Proszę wybrać: ", label)
+  paste("", label)
 }
-
-menu <- (
-  div(class = "ui three item menu",
-      a(class = "item", href = "/", uiicon("home"), "Wykresy zanieczyszczeń"),
-      a(class = "item", href = "/map", uiicon("clock"), "Mapa stacji"),
-      a(class = "item", href = "/future", uiicon("clock"), "Przyszłość")
-  )
-)
-
-column <- function(...) {
-  div(class = "column", ...)
-}
-
-  
-select_stations <- div(class = "ui container",
-                       div(class="ui grid",
-                           div(class = "two column row",
-                               div(class = "column", 
-                                   tags$div(class="header", checked=NA,
-                                            tags$p(tags$b("Wybierz stację nr 1:"))
-                                   ),
-                                   uiOutput("location_search")),
-                               div(class = "column", 
-                                   tags$div(class="header", checked=NA,
-                                            tags$p(tags$b("Wybierz stację nr 2:"))
-                                   ),
-                                   uiOutput("location_search_2"))
-                               )
-                           )
-                       )
-
-compare_stations <- (
-  div(class="ui container",
-      div(class="ui grid",
-          div(class = "sixteen wide column",
-              menu,
-              p("W tej zakładce możesz porównać ze sobą dane o jakości powietrza z dwóch wybranych stacji pomiaru zanieczyszczeń. 
-                Aby wygenerować wykresy należy z rowijanych menu poniżej wybrać 2 stacje pomiarowe."),
-              p(),
-              select_stations,
-              p(),
-              uiOutput("ui_pm25"),
-              p(),
-              uiOutput("ui_pm10"),
-              p(),
-              uiOutput("ui_no2"),
-              p(),
-              uiOutput("ui_co")
-          )
-      )
-  )
-)
-
-map_stations <- (
-  div(class="ui container",
-      div(class="ui grid",
-          div(class = "sixteen wide column",
-              menu,
-              p("Tu będzie mapa stacji."),
-              p()
-          )
-      )
-  )
-)
 
 router <- make_router(
   route("/", compare_stations),
@@ -113,7 +49,7 @@ server <- shinyServer(function(input, output) {
   })
   
   selected_location <- reactive({
-    validate_inputs(input$location_pl, "stację")
+    validate_inputs(input$location_pl, "")
     jsonlite::fromJSON(input$location_pl)
   })
   
@@ -122,7 +58,7 @@ server <- shinyServer(function(input, output) {
   })
   
   selected_location_2 <- reactive({
-    validate_inputs(input$location_pl_2, "station")
+    validate_inputs(input$location_pl_2, "")
     jsonlite::fromJSON(input$location_pl_2)
   })
   
@@ -157,17 +93,32 @@ server <- shinyServer(function(input, output) {
          is_co = !is.na(selection_1$co) | !is.na(selection_2$co))
 })
   
+  get_colors_plot <- function(data_measurements, ids_fileterd_data){
+    all_colors = viridis::viridis_pal(option = "D")(2)
+    ids_all_data <- c(data_measurements$group_id %>% unique)
+    list_types_colors <- setNames(as.list(all_colors), ids_all_data)
+    if (length(ids_fileterd_data) != length(ids_all_data)){
+      list_types_colors[[ids_fileterd_data]]
+    } else {
+      unlist(list_types_colors)
+    }
+  }
+  
   generate_plot <- function(measurement_values, element, titel) {
     data_measurements <- measurement_values$data
-    data_chart <- data_measurements %>% filter(idParam == element)
-    n_series = length(unique(data_chart$group_id))
-    plot_ly(data = data_chart, x = ~as.POSIXct(datetime, tz = "UTC"),
-            y = ~value_sensor,
-            group_by = ~group_id,
-            color = ~group_id,
-            colors = viridis::viridis_pal(option = "D")(n_series),
-            text = paste(data_chart$value_sensor), mode = 'lines+markers') %>%
-      layout(title = titel, showlegend = T)
+    data_chart <- data_measurements %>% filter(idParam == element) %>% na.omit 
+    n_series = unique(data_chart$group_id)
+    if(nrow(data_chart) != 0){
+      plot_ly(data = data_chart, x = ~as.POSIXct(datetime, tz = "UTC"),
+              y = ~value_sensor,
+              color = ~group_id,
+              colors = get_colors_plot(data_measurements, n_series),
+              text = paste(data_chart$value_sensor), mode = 'lines+markers') %>%
+        layout(title = titel, showlegend = T, xaxis = list(title = "Data i godzina odczytu"),
+               yaxis = list(title = "Wartość odczytu [µg/m3]")) %>% suppressMessages()
+    } else {
+      plot_ly()
+    }
   }
   
   render_plot_output <- function(is_element, plotly_output, info) {
@@ -200,7 +151,6 @@ server <- shinyServer(function(input, output) {
   
   output$ui_pm25 <- renderUI ({
     measurement_values <- measurements()
-    print(measurement_values$is_pm25)
     render_plot_output(measurement_values$is_pm25, plotlyOutput("plot_pm25"), "Brak danych o poziomie PM2.5")
   })
   
