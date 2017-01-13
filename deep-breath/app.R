@@ -74,8 +74,7 @@ server <- shinyServer(function(input, output) {
     o3 = filter_location$`3`
     c6h6 = filter_location$`10`
     id = filter_location$`id`
-    list(id = id, location = selected_location, pm25 = pm25, pm10 = pm10,
-         no2 = no2, co = co, so2 = so2, o3 = o3, c6h6 = c6h6, all = c(pm25, pm10, no2, co, so2, o3, c6h6))
+    list(id = id, location = selected_location, all = c(pm25, pm10, no2, co, so2, o3, c6h6))
   }
   
   measurements <- reactive({
