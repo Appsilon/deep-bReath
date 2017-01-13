@@ -58,13 +58,7 @@ compare_stations <- (
               p(),
               select_stations,
               p(),
-              uiOutput("ui_pm25"),
-              p(),
-              uiOutput("ui_pm10"),
-              p(),
-              uiOutput("ui_no2"),
-              p(),
-              uiOutput("ui_co")
+              uiOutput("plots")
               )
       )
   )

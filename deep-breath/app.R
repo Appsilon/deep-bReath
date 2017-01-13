@@ -13,6 +13,8 @@ source("semantic_ui.R")
 
 stations_all <- read_feather("stations_all.feather")
 sensor_all <- read_feather("sensor_all.feather")
+sensors_info <- read_feather("sensors_info.feather")
+n_elements <- nrow(sensors_info)
 
 locations <- stations_all$stationName %>% sort
 
@@ -62,35 +64,32 @@ server <- shinyServer(function(input, output) {
     jsonlite::fromJSON(input$location_pl_2)
   })
   
-  get_city_station_url <- function(selected_location) {
+  get_city_station <- function(selected_location) {
     filter_location <- stations_all %>% filter(stationName == selected_location)
     pm25 = filter_location$`69`
     pm10 = filter_location$`3`
     no2 =  filter_location$`6`
     co =  filter_location$`8`
+    so2 = filter_location$`1`
+    o3 = filter_location$`3`
+    c6h6 = filter_location$`10`
     id = filter_location$`id`
-    list(id = id, location = selected_location, pm25 = pm25, pm10 = pm10, no2 = no2, co = co)
+    list(id = id, location = selected_location, pm25 = pm25, pm10 = pm10,
+         no2 = no2, co = co, so2 = so2, o3 = o3, c6h6 = c6h6, all = c(pm25, pm10, no2, co, so2, o3, c6h6))
   }
   
   measurements <- reactive({
     location_1_value = selected_location()
     location_2_value = selected_location_2()
-    selection_1 <- get_city_station_url(location_1_value)
-    selection_2 <- get_city_station_url(location_2_value)
-    
+    selection_1 <- get_city_station(location_1_value)
+    selection_2 <- get_city_station(location_2_value)
+    both_selections <- c(selection_1$all, selection_2$all)
+      
     measurement <- sensor_all %>%
-      filter(id %in% c(selection_1$pm25, selection_2$pm25,
-                       selection_1$pm10, selection_2$pm10,
-                       selection_1$no2, selection_2$no2,
-                       selection_1$co, selection_2$co)) %>% 
-      mutate(group_id = ifelse(id %in% c(selection_1$pm25, selection_1$pm10, selection_1$no2, selection_1$co),
+      filter(id %in% both_selections) %>% 
+      mutate(group_id = ifelse(id %in% selection_1$all,
                                selection_1$location, selection_2$location))
-
-    list(data = measurement,
-         is_pm25 = !is.na(selection_1$pm25) | !is.na(selection_2$pm25),
-         is_pm10 = !is.na(selection_1$pm10) | !is.na(selection_2$pm10),
-         is_no2 = !is.na(selection_1$no2) | !is.na(selection_2$no2),
-         is_co = !is.na(selection_1$co) | !is.na(selection_2$co))
+   
 })
   
   get_colors_plot <- function(data_measurements, ids_fileterd_data){
@@ -104,16 +103,14 @@ server <- shinyServer(function(input, output) {
     }
   }
   
-  generate_plot <- function(measurement_values, element, titel) {
-    data_measurements <- measurement_values$data
-    data_chart <- data_measurements %>% filter(idParam == element) %>% na.omit 
-    n_series = unique(data_chart$group_id)
-    if(nrow(data_chart) != 0){
-      plot_ly(data = data_chart, x = ~as.POSIXct(datetime, tz = "UTC"),
+  generate_plot <- function(measurements_all, measurement_values, element, titel) {
+    n_series = unique(measurement_values$group_id)
+    if(nrow(measurement_values) != 0){
+      plot_ly(data = measurement_values, x = ~as.POSIXct(datetime, tz = "UTC"),
               y = ~value_sensor,
               color = ~group_id,
-              colors = get_colors_plot(data_measurements, n_series),
-              text = paste(data_chart$value_sensor), mode = 'lines+markers') %>%
+              colors = get_colors_plot(measurements_all, n_series),
+              text = paste(measurement_values$value_sensor), mode = 'lines+markers') %>%
         layout(title = titel, showlegend = T, xaxis = list(title = "Data i godzina odczytu"),
                yaxis = list(title = "Wartość odczytu [µg/m3]")) %>% suppressMessages()
     } else {
@@ -121,53 +118,51 @@ server <- shinyServer(function(input, output) {
     }
   }
   
-  render_plot_output <- function(is_element, plotly_output, info) {
-    if(is_element){
+  render_plot_output <- function(measurement_values, plotly_output, info) {
+    if(nrow(measurement_values) != 0){
       plotly_output
     } else {
       info
     }
   }
+  
+  output$plots <- renderUI({
+    plot_output_list <- lapply(1:n_elements, function(i) {
+      plot_name <- paste0("chart_output_", i)
+      uiOutput(plot_name)
+    })
+    print(do.call(tagList, plot_output_list))
+    do.call(tagList, plot_output_list)
+    
+  })
+  
+  for (i in 1:n_elements) {
+    local({
+      local_i <- i
+      
+      measurement_element <- reactive({
+        measurements() %>% filter(idParam == sensors_info$idParam[local_i]) %>% na.omit
+      })
+      
+      plotly_name <- paste("plotly_output", local_i, sep = "_")
+      output[[plotly_name]] <- renderPlotly({
+        measurement_values <- measurement_element()
+        measurements_1 <- measurements()
+        generate_plot(measurements_1, measurement_values, element = sensors_info$idParam[local_i], 
+                      titel = paste("Wykres poziomu pyłu", sensors_info$paramCode[local_i]))
+      })
 
-  output$plot_pm25 <- renderPlotly({
-    measurement_values <- measurements()
-    generate_plot(measurement_values, element = 69, titel = "Wykres poziomu pyłu PM2.5")
-  })
-  
-  output$plot_pm10 <- renderPlotly({
-    measurement_values <- measurements()
-    generate_plot(measurement_values, element = 3, titel = "Wykres poziomu pyłu PM10")
-  })
-  
-  output$plot_no2 <- renderPlotly({
-    measurement_values <- measurements()
-    generate_plot(measurement_values, element = 6, titel = "Wykres poziomu gazu NO2")
-  })
-  
-  output$plot_co <- renderPlotly({
-    measurement_values <- measurements()
-    generate_plot(measurement_values, element = 8, titel = "Wykres poziomu gazu CO")
-  })
-  
-  output$ui_pm25 <- renderUI ({
-    measurement_values <- measurements()
-    render_plot_output(measurement_values$is_pm25, plotlyOutput("plot_pm25"), "Brak danych o poziomie PM2.5")
-  })
-  
-  output$ui_pm10 <- renderUI ({
-    measurement_values <- measurements()
-    render_plot_output(measurement_values$is_pm10, plotlyOutput("plot_pm10"), "Brak danych o poziomie PM10")
-  })
-  
-  output$ui_no2 <- renderUI ({
-    measurement_values <- measurements()
-    render_plot_output(measurement_values$is_no2, plotlyOutput("plot_no2"), "Brak danych o poziomie NO2")
-  })
-  
-  output$ui_co <- renderUI ({
-    measurement_values <- measurements()
-    render_plot_output(measurement_values$is_co, plotlyOutput("plot_co"), "Brak danych o poziomie CO")
-  })
+      chart_name <- paste("chart_output", local_i, sep = "_")
+      output[[chart_name]] <- renderUI ({
+        measurement_values <- measurement_element()
+        render_plot_output(measurement_values, plotlyOutput(plotly_name),
+                           paste0("Brak danych o poziomie", sensors_info$paramCode[local_i]))
+      })
+      
+
+      
+    })
+  }
   
 })
 

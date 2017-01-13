@@ -58,5 +58,13 @@ sensor_all <- sensor_all %>%
          datetime = as.POSIXct(as.numeric(name) / 1000, tz = "UTC", origin="1970-01-01")) %>%
   filter(!is.na(value_sensor))
 
+classes_sensor_info <- get_classes(kanarek$sensors$`1`)
+names_to_select_sensor_info <- get_names_to_select(classes_sensor_info)
+
+do.call(plyr::rbind.fill, lapply(kanarek$sensors, function(x){
+  x[ which(names(x) %in% names_to_select_sensor_info)][1:4] %>% as_data_frame() 
+})) -> sensors_info
+
 write_feather(stations_all, "stations_all.feather")
 write_feather(sensor_all, "sensor_all.feather")
+write_feather(sensors_info, "sensors_info.feather")
